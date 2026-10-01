@@ -23,8 +23,12 @@ import {
   HelpCircle,
   Copy,
   Check,
-  Languages
+  Languages,
+  Cloud,
+  CloudOff
 } from "lucide-react";
+import { db, isFirebaseConfigured } from "./firebase";
+import { doc, onSnapshot, setDoc, deleteDoc } from "firebase/firestore";
 
 // Month names in English & Gujarati
 const MONTHS_EN = [
@@ -74,31 +78,88 @@ export default function App() {
 
   const [copied, setCopied] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
 
-  // Load data when year/month changes
+  // Sync settings with Firestore
   useEffect(() => {
+    if (!isFirebaseConfigured || !db) return;
+
+    const settingsRef = doc(db, "chai_tracker", "app_settings");
+    const unsubscribe = onSnapshot(settingsRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.ratePerCup !== undefined) {
+          setRatePerCup(data.ratePerCup);
+          localStorage.setItem("chai_tracker_rate", data.ratePerCup);
+        }
+        if (data.officeName !== undefined) {
+          setOfficeName(data.officeName);
+          localStorage.setItem("chai_tracker_office", data.officeName);
+        }
+        if (data.vendorName !== undefined) {
+          setVendorName(data.vendorName);
+          localStorage.setItem("chai_tracker_vendor", data.vendorName);
+        }
+      }
+    }, (err) => {
+      console.error("Firestore settings sync error:", err);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Load / Real-time sync data when year/month changes
+  useEffect(() => {
+    // 1. Initial load from localStorage
     try {
       const saved = localStorage.getItem(storageKey);
       setMonthData(saved ? JSON.parse(saved) : {});
     } catch (e) {
       setMonthData({});
     }
-  }, [storageKey]);
 
-  // Save data to localStorage
-  const updateDay = (day, field, value) => {
+    // 2. Real-time sync from Firestore if enabled
+    if (isFirebaseConfigured && db) {
+      setIsCloudSyncing(true);
+      const monthDocRef = doc(db, "chai_records", `${currentYear}_${currentMonth}`);
+      const unsubscribe = onSnapshot(monthDocRef, (docSnap) => {
+        setIsCloudSyncing(false);
+        if (docSnap.exists()) {
+          const cloudData = docSnap.data()?.days || {};
+          setMonthData(cloudData);
+          localStorage.setItem(storageKey, JSON.stringify(cloudData));
+        }
+      }, (err) => {
+        setIsCloudSyncing(false);
+        console.error("Firestore month sync error:", err);
+      });
+
+      return () => unsubscribe();
+    }
+  }, [storageKey, currentYear, currentMonth]);
+
+  // Save data to localStorage and Firestore
+  const updateDay = async (day, field, value) => {
     const numVal = Math.max(0, parseInt(value, 10) || 0);
-    setMonthData((prev) => {
-      const updated = {
-        ...prev,
-        [day]: {
-          ...prev[day],
-          [field]: numVal,
-        },
-      };
-      localStorage.setItem(storageKey, JSON.stringify(updated));
-      return updated;
-    });
+    const updated = {
+      ...monthData,
+      [day]: {
+        ...monthData[day],
+        [field]: numVal,
+      },
+    };
+
+    setMonthData(updated);
+    localStorage.setItem(storageKey, JSON.stringify(updated));
+
+    if (isFirebaseConfigured && db) {
+      try {
+        const monthDocRef = doc(db, "chai_records", `${currentYear}_${currentMonth}`);
+        await setDoc(monthDocRef, { days: updated, updatedAt: new Date().toISOString() }, { merge: true });
+      } catch (err) {
+        console.error("Firestore save error:", err);
+      }
+    }
   };
 
   const incrementDay = (day, field, delta = 1) => {
@@ -175,7 +236,7 @@ export default function App() {
   };
 
   // Quick fill helper
-  const fillDefaultWeekday = (morningCups = 2, afternoonCups = 2) => {
+  const fillDefaultWeekday = async (morningCups = 2, afternoonCups = 2) => {
     const confirmMsg = lang === "en" 
       ? "Set default 2 morning & 2 afternoon cups for all weekdays (Mon-Sat) this month?" 
       : "શું તમે આખા મહિનાના કામકાજના દિવસોમાં ડિફોલ્ટ ૨ સવાર + ૨ બપોર ચા સેટ કરવા માંગો છો?";
@@ -193,15 +254,55 @@ export default function App() {
     }
     setMonthData(updated);
     localStorage.setItem(storageKey, JSON.stringify(updated));
+
+    if (isFirebaseConfigured && db) {
+      try {
+        const monthDocRef = doc(db, "chai_records", `${currentYear}_${currentMonth}`);
+        await setDoc(monthDocRef, { days: updated, updatedAt: new Date().toISOString() }, { merge: true });
+      } catch (err) {
+        console.error("Firestore fill weekday error:", err);
+      }
+    }
   };
 
-  const clearMonthData = () => {
+  const clearMonthData = async () => {
     const confirmMsg = lang === "en"
       ? "Are you sure you want to clear all tea entries for this month?"
       : "ચેતવણી: શું તમે આ મહિનાનો બધો ચા હિસાબ કાઢી નાખવા માંગો છો?";
     if (window.confirm(confirmMsg)) {
       setMonthData({});
       localStorage.removeItem(storageKey);
+
+      if (isFirebaseConfigured && db) {
+        try {
+          const monthDocRef = doc(db, "chai_records", `${currentYear}_${currentMonth}`);
+          await deleteDoc(monthDocRef);
+        } catch (err) {
+          console.error("Firestore delete error:", err);
+        }
+      }
+    }
+  };
+
+  const updateSettingValue = async (key, val) => {
+    if (key === "rate") {
+      setRatePerCup(val);
+      localStorage.setItem("chai_tracker_rate", val);
+      if (isFirebaseConfigured && db) {
+        setDoc(doc(db, "chai_tracker", "app_settings"), { ratePerCup: val }, { merge: true }).catch(console.error);
+      }
+    } else if (key === "office") {
+      setOfficeName(val);
+      localStorage.setItem("chai_tracker_office", val);
+      if (isFirebaseConfigured && db) {
+        setDoc(doc(db, "chai_tracker", "app_settings"), { officeName: val }, { merge: true }).catch(console.error);
+      }
+    } else if (key === "vendor") {
+      setVendorName(val);
+      localStorage.setItem("chai_tracker_vendor", val);
+      if (isFirebaseConfigured && db) {
+        setDoc(doc(db, "chai_tracker", "app_settings"), { vendorName: val }, { merge: true }).catch(console.error);
+      }
     }
   };
 
@@ -266,6 +367,32 @@ export default function App() {
 
           {/* Quick Actions & Settings */}
           <div className="flex items-center flex-wrap gap-2">
+            {/* Cloud Sync Status Badge */}
+            <div
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border ${
+                isFirebaseConfigured
+                  ? "bg-emerald-950/80 text-emerald-300 border-emerald-700/60"
+                  : "bg-amber-950/80 text-amber-300 border-amber-700/60"
+              }`}
+              title={
+                isFirebaseConfigured
+                  ? "Firebase Firestore Connected (Real-time Cloud Sync)"
+                  : "Local Mode (Saved in this browser only). Configure Firebase in .env to sync across all office devices."
+              }
+            >
+              {isFirebaseConfigured ? (
+                <>
+                  <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>{isCloudSyncing ? "Syncing..." : (lang === "en" ? "Cloud Sync" : "ક્લાઉડ સિન્ક")}</span>
+                </>
+              ) : (
+                <>
+                  <CloudOff className="w-3.5 h-3.5 text-amber-400" />
+                  <span>{lang === "en" ? "Local Mode" : "લોકલ મોડ"}</span>
+                </>
+              )}
+            </div>
+
             {/* Language Switcher */}
             <button
               onClick={() => setLang(lang === "en" ? "gu" : "en")}
@@ -398,8 +525,7 @@ export default function App() {
                     value={ratePerCup}
                     onChange={(e) => {
                       const val = Number(e.target.value) || 1;
-                      setRatePerCup(val);
-                      localStorage.setItem("chai_tracker_rate", val);
+                      updateSettingValue("rate", val);
                     }}
                     className="w-full pl-8 pr-3 py-2 bg-white border border-slate-300 rounded-xl text-sm font-bold focus:ring-2 focus:ring-amber-500 outline-none"
                   />
@@ -413,10 +539,7 @@ export default function App() {
                 <input
                   type="text"
                   value={officeName}
-                  onChange={(e) => {
-                    setOfficeName(e.target.value);
-                    localStorage.setItem("chai_tracker_office", e.target.value);
-                  }}
+                  onChange={(e) => updateSettingValue("office", e.target.value)}
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-amber-500 outline-none"
                 />
               </div>
@@ -428,12 +551,29 @@ export default function App() {
                 <input
                   type="text"
                   value={vendorName}
-                  onChange={(e) => {
-                    setVendorName(e.target.value);
-                    localStorage.setItem("chai_tracker_vendor", e.target.value);
-                  }}
+                  onChange={(e) => updateSettingValue("vendor", e.target.value)}
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-amber-500 outline-none"
                 />
+              </div>
+            </div>
+
+            {/* Cloud Database Status Info */}
+            <div className="mt-3 p-3 bg-amber-100/70 border border-amber-300 rounded-xl flex items-center justify-between text-xs text-amber-900">
+              <div className="flex items-center gap-2">
+                {isFirebaseConfigured ? (
+                  <Cloud className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <CloudOff className="w-4 h-4 text-amber-600 shrink-0" />
+                )}
+                <span>
+                  {isFirebaseConfigured
+                    ? (lang === "en"
+                        ? "🟢 Firebase Firestore Connected: All changes are synced in real-time across all office devices."
+                        : "🟢 Firebase Firestore કનેક્ટેડ: તમામ ફેરફારો ઓફિસના દરેક ડિવાઇસ પર રીયલ-ટાઇમ અપડેટ થાય છે.")
+                    : (lang === "en"
+                        ? "🟡 Local Storage Mode: To sync between multiple PCs/phones, add your Firebase keys in .env file."
+                        : "🟡 લોકલ સ્ટોરેજ મોડ: બીજા PC કે મોબાઈલ સાથે સિન્ક કરવા માટે .env ફાઈલમાં Firebase કી ઉમેરો.")}
+                </span>
               </div>
             </div>
 
