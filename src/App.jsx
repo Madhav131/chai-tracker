@@ -6,7 +6,6 @@ import {
   Calendar,
   DollarSign,
   Printer,
-  Share2,
   Download,
   Trash2,
   ChevronLeft,
@@ -23,7 +22,6 @@ import {
   HelpCircle,
   Copy,
   Check,
-  Languages,
   Cloud,
   CloudOff
 } from "lucide-react";
@@ -393,16 +391,6 @@ export default function App() {
               )}
             </div>
 
-            {/* Language Switcher */}
-            <button
-              onClick={() => setLang(lang === "en" ? "gu" : "en")}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/90 hover:bg-stone-900 text-amber-200 text-xs font-bold rounded-xl border border-amber-700/60 transition-all shadow-sm"
-              title="Switch Language"
-            >
-              <Languages className="w-3.5 h-3.5" />
-              <span>{lang === "en" ? "ગુજરાતી" : "English"}</span>
-            </button>
-
             <button
               onClick={() => setShowSettings(!showSettings)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/80 hover:bg-amber-950 text-amber-200 text-xs font-semibold rounded-xl border border-amber-700/60 transition-all shadow-sm"
@@ -410,15 +398,6 @@ export default function App() {
             >
               <Settings className="w-3.5 h-3.5" />
               <span>Rate: ₹{ratePerCup}</span>
-            </button>
-
-            <button
-              onClick={copyWhatsAppReport}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all shadow-md active:scale-95"
-              title="Copy WhatsApp Summary"
-            >
-              {copied ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
-              <span>{copied ? (lang === "en" ? "Copied!" : "કોપી થઈ ગયું!") : "WhatsApp Bill"}</span>
             </button>
 
             <button
