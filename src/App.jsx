@@ -23,7 +23,9 @@ import {
   Copy,
   Check,
   Cloud,
-  CloudOff
+  CloudOff,
+  Lock,
+  Unlock
 } from "lucide-react";
 import { db, isFirebaseConfigured } from "./firebase";
 import { doc, onSnapshot, setDoc, deleteDoc } from "firebase/firestore";
@@ -48,6 +50,11 @@ export default function App() {
   const [currentMonth, setCurrentMonth] = useState(today.getMonth()); // 0-11
   const [activeView, setActiveView] = useState("notebook"); // "notebook" | "table"
   const [lang, setLang] = useState("en"); // "en" | "gu"
+
+  // Check if viewed month is the current active month (only current month is editable)
+  const isCurrentMonthThisMonth =
+    today.getFullYear() === currentYear && today.getMonth() === currentMonth;
+  const currentTodayDate = today.getDate();
 
   const [ratePerCup, setRatePerCup] = useState(() => {
     const saved = localStorage.getItem("chai_tracker_rate");
@@ -136,8 +143,9 @@ export default function App() {
     }
   }, [storageKey, currentYear, currentMonth]);
 
-  // Save data to localStorage and Firestore
+  // Save data to localStorage and Firestore (Only allowed for current month)
   const updateDay = async (day, field, value) => {
+    if (!isCurrentMonthThisMonth) return;
     const numVal = Math.max(0, parseInt(value, 10) || 0);
     const updated = {
       ...monthData,
@@ -161,6 +169,7 @@ export default function App() {
   };
 
   const incrementDay = (day, field, delta = 1) => {
+    if (!isCurrentMonthThisMonth) return;
     const current = monthData[day]?.[field] || 0;
     const nextVal = Math.max(0, current + delta);
     updateDay(day, field, nextVal);
@@ -204,11 +213,6 @@ export default function App() {
     };
   }, [monthData, daysInMonth, ratePerCup]);
 
-  // Today helpers
-  const isCurrentMonthThisMonth =
-    today.getFullYear() === currentYear && today.getMonth() === currentMonth;
-  const currentTodayDate = today.getDate();
-
   // Navigation
   const prevMonth = () => {
     if (currentMonth === 0) {
@@ -233,8 +237,17 @@ export default function App() {
     setCurrentMonth(today.getMonth());
   };
 
-  // Quick fill helper
+  // Quick fill helper (only permitted for current month)
   const fillDefaultWeekday = async (morningCups = 2, afternoonCups = 2) => {
+    if (!isCurrentMonthThisMonth) {
+      alert(
+        lang === "en"
+          ? "Auto-fill is only allowed for the current active month."
+          : "ઓટો-ફીલ ફક્ત ચાલુ મહિના માટે જ શક્ય છે."
+      );
+      return;
+    }
+
     const confirmMsg = lang === "en" 
       ? "Set default 2 morning & 2 afternoon cups for all weekdays (Mon-Sat) this month?" 
       : "શું તમે આખા મહિનાના કામકાજના દિવસોમાં ડિફોલ્ટ ૨ સવાર + ૨ બપોર ચા સેટ કરવા માંગો છો?";
@@ -264,6 +277,15 @@ export default function App() {
   };
 
   const clearMonthData = async () => {
+    if (!isCurrentMonthThisMonth) {
+      alert(
+        lang === "en"
+          ? "Reset is only allowed for the current active month."
+          : "ડેટા સાફ કરવો ફક્ત ચાલુ મહિના માટે જ શક્ય છે."
+      );
+      return;
+    }
+
     const confirmMsg = lang === "en"
       ? "Are you sure you want to clear all tea entries for this month?"
       : "ચેતવણી: શું તમે આ મહિનાનો બધો ચા હિસાબ કાઢી નાખવા માંગો છો?";
@@ -423,10 +445,11 @@ export default function App() {
         {/* Month Selector Strip */}
         <div className="bg-stone-950/90 border-t border-amber-900/50 px-4 py-2">
           <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={prevMonth}
                 className="p-1.5 rounded-lg bg-amber-900/80 hover:bg-amber-800 text-amber-200 border border-amber-700/60 transition"
+                title="Previous Month"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
@@ -440,14 +463,28 @@ export default function App() {
               <button
                 onClick={nextMonth}
                 className="p-1.5 rounded-lg bg-amber-900/80 hover:bg-amber-800 text-amber-200 border border-amber-700/60 transition"
+                title="Next Month"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
 
+              {/* Editable or Locked Indicator */}
+              {isCurrentMonthThisMonth ? (
+                <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-bold flex items-center gap-1">
+                  <Unlock className="w-3 h-3" />
+                  <span>{lang === "en" ? "Current Month (Editable)" : "ચાલુ મહિનો (એડિટ ચાલુ)"}</span>
+                </span>
+              ) : (
+                <span className="px-2.5 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold flex items-center gap-1">
+                  <Lock className="w-3 h-3" />
+                  <span>{lang === "en" ? "View Only (Read-Only)" : "માત્ર જોવા માટે (Read-Only)"}</span>
+                </span>
+              )}
+
               {!isCurrentMonthThisMonth && (
                 <button
                   onClick={goToThisMonth}
-                  className="text-xs text-amber-300 underline font-medium hover:text-amber-100 ml-2"
+                  className="text-xs text-amber-300 underline font-semibold hover:text-amber-100 ml-1"
                 >
                   {lang === "en" ? "Go to Current Month" : "આ મહિનો"}
                 </button>
@@ -557,20 +594,31 @@ export default function App() {
             </div>
 
             <div className="mt-4 pt-3 border-t border-amber-200 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex gap-2">
-                <button
-                  onClick={() => fillDefaultWeekday(2, 2)}
-                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-xl shadow-sm"
-                >
-                  {lang === "en" ? "⚡ Auto-Fill Mon-Sat (2 Morning + 2 Afternoon)" : "⚡ ઓટો ફીલ: સોમ-શનિ ૨ સવાર + ૨ બપોર"}
-                </button>
-                <button
-                  onClick={clearMonthData}
-                  className="px-3 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-800 text-xs font-semibold rounded-xl border border-rose-300"
-                >
-                  {lang === "en" ? "🗑️ Reset Month Data" : "🗑️ આ મહિનો સાફ કરો"}
-                </button>
-              </div>
+              {isCurrentMonthThisMonth ? (
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => fillDefaultWeekday(2, 2)}
+                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-xl shadow-sm"
+                  >
+                    {lang === "en" ? "⚡ Auto-Fill Mon-Sat (2 Morning + 2 Afternoon)" : "⚡ ઓટો ફીલ: સોમ-શનિ ૨ સવાર + ૨ બપોર"}
+                  </button>
+                  <button
+                    onClick={clearMonthData}
+                    className="px-3 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-800 text-xs font-semibold rounded-xl border border-rose-300"
+                  >
+                    {lang === "en" ? "🗑️ Reset Month Data" : "🗑️ આ મહિનો સાફ કરો"}
+                  </button>
+                </div>
+              ) : (
+                <div className="text-xs text-amber-900 bg-amber-100 px-3 py-1.5 rounded-xl border border-amber-300 font-medium flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                  <span>
+                    {lang === "en"
+                      ? "Auto-Fill & Reset actions are locked for previous/future months."
+                      : "અગાઉના કે ભવિષ્યના મહિના માટે ઓટો-ફીલ અને રીસેટ વિકલ્પો લૉક કરેલા છે."}
+                  </span>
+                </div>
+              )}
               <button
                 onClick={() => setShowSettings(false)}
                 className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl"
@@ -754,6 +802,42 @@ export default function App() {
           </div>
         )}
 
+        {/* View-Only Mode Banner for Previous or Future Months */}
+        {!isCurrentMonthThisMonth && (
+          <div className="mb-6 bg-amber-50/90 border-2 border-amber-300 rounded-2xl p-4 shadow-sm flex flex-wrap items-center justify-between gap-4 no-print">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-amber-200 border border-amber-400/80 flex items-center justify-center text-amber-900 shadow-sm">
+                <Lock className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                  <span>
+                    {lang === "en"
+                      ? `Viewing Record: ${MONTHS_EN[currentMonth]} ${currentYear}`
+                      : `જૂનો / આગામી રેકોર્ડ: ${MONTHS_GU[currentMonth]} ${currentYear}`}
+                  </span>
+                  <span className="px-2.5 py-0.5 bg-amber-200 text-amber-900 text-[10px] font-black rounded-full border border-amber-300">
+                    {lang === "en" ? "READ ONLY" : "માત્ર જોવા માટે (LOCKED)"}
+                  </span>
+                </h4>
+                <p className="text-xs text-slate-600">
+                  {lang === "en"
+                    ? "Previous & future month records cannot be edited. All previously entered data is safely preserved."
+                    : "અગાઉના કે ભવિષ્યના મહિનામાં નવો ડેટા ઉમેરી કે બદલી શકાશે નહીં. અગાઉ દાખલ કરેલો જૂનો હિસાબ સુરક્ષિત સચવાયેલો છે."}
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={goToThisMonth}
+              className="px-4 py-2 bg-gradient-to-r from-amber-700 to-amber-800 hover:from-amber-800 hover:to-amber-900 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center gap-1.5"
+            >
+              <Unlock className="w-3.5 h-3.5" />
+              <span>{lang === "en" ? "Go to Current Month (Editable)" : "ચાલુ મહિનો (એડિટ કરો)"}</span>
+            </button>
+          </div>
+        )}
+
         {/* VIEW 1: NOTEBOOK CHOPDO VIEW (1-16 and 17-31 two-column tally sheet matching diary photo) */}
         {activeView === "notebook" && (
           <div className="bg-white rounded-2xl shadow-lg border border-slate-300 overflow-hidden">
@@ -766,7 +850,9 @@ export default function App() {
                 </h2>
               </div>
               <div className="text-xs text-amber-200 font-medium">
-                {lang === "en" ? "💡 Enter numbers directly in boxes or use +/- buttons" : "💡 બોક્સમાં સીધા નંબર લખો અથવા +/- કરો"}
+                {isCurrentMonthThisMonth
+                  ? (lang === "en" ? "💡 Enter numbers directly in boxes or use +/- buttons" : "💡 બોક્સમાં સીધા નંબર લખો અથવા +/- કરો")
+                  : (lang === "en" ? "🔒 Read-Only: Previous/future records cannot be modified" : "🔒 માત્ર જોવા માટે: અગાઉનો/ભવિષ્યનો હિસાબ એડિટ થશે નહીં")}
               </div>
             </div>
 
@@ -845,57 +931,81 @@ export default function App() {
                             </td>
                             {/* Morning Box */}
                             <td className="py-1.5 px-2 bg-orange-50/30">
-                              <div className="flex items-center justify-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => incrementDay(day, "morning", -1)}
-                                  className="w-5 h-6 rounded bg-slate-200 hover:bg-orange-200 text-slate-700 text-xs font-bold no-print"
-                                >
-                                  -
-                                </button>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  placeholder="0"
-                                  value={m}
-                                  onChange={(e) => updateDay(day, "morning", e.target.value)}
-                                  className="w-12 text-center py-1 bg-white border border-orange-300 rounded-md font-bold text-orange-950 focus:ring-2 focus:ring-orange-400 outline-none text-sm"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => incrementDay(day, "morning", 1)}
-                                  className="w-5 h-6 rounded bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold no-print"
-                                >
-                                  +
-                                </button>
-                              </div>
+                              {isCurrentMonthThisMonth ? (
+                                <div className="flex items-center justify-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => incrementDay(day, "morning", -1)}
+                                    className="w-5 h-6 rounded bg-slate-200 hover:bg-orange-200 text-slate-700 text-xs font-bold no-print"
+                                  >
+                                    -
+                                  </button>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    placeholder="0"
+                                    value={m}
+                                    onChange={(e) => updateDay(day, "morning", e.target.value)}
+                                    className="w-12 text-center py-1 bg-white border border-orange-300 rounded-md font-bold text-orange-950 focus:ring-2 focus:ring-orange-400 outline-none text-sm"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => incrementDay(day, "morning", 1)}
+                                    className="w-5 h-6 rounded bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold no-print"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="text-center py-1 font-bold text-orange-950 text-sm">
+                                  {Number(m) > 0 ? (
+                                    <span className="inline-block px-2.5 py-0.5 bg-orange-100/90 text-orange-950 rounded-md font-black border border-orange-200">
+                                      {m}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-300">-</span>
+                                  )}
+                                </div>
+                              )}
                             </td>
                             {/* Afternoon Box */}
                             <td className="py-1.5 px-2 bg-sky-50/30">
-                              <div className="flex items-center justify-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => incrementDay(day, "afternoon", -1)}
-                                  className="w-5 h-6 rounded bg-slate-200 hover:bg-sky-200 text-slate-700 text-xs font-bold no-print"
-                                >
-                                  -
-                                </button>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  placeholder="0"
-                                  value={a}
-                                  onChange={(e) => updateDay(day, "afternoon", e.target.value)}
-                                  className="w-12 text-center py-1 bg-white border border-sky-300 rounded-md font-bold text-sky-950 focus:ring-2 focus:ring-sky-400 outline-none text-sm"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => incrementDay(day, "afternoon", 1)}
-                                  className="w-5 h-6 rounded bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold no-print"
-                                >
-                                  +
-                                </button>
-                              </div>
+                              {isCurrentMonthThisMonth ? (
+                                <div className="flex items-center justify-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => incrementDay(day, "afternoon", -1)}
+                                    className="w-5 h-6 rounded bg-slate-200 hover:bg-sky-200 text-slate-700 text-xs font-bold no-print"
+                                  >
+                                    -
+                                  </button>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    placeholder="0"
+                                    value={a}
+                                    onChange={(e) => updateDay(day, "afternoon", e.target.value)}
+                                    className="w-12 text-center py-1 bg-white border border-sky-300 rounded-md font-bold text-sky-950 focus:ring-2 focus:ring-sky-400 outline-none text-sm"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => incrementDay(day, "afternoon", 1)}
+                                    className="w-5 h-6 rounded bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold no-print"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="text-center py-1 font-bold text-sky-950 text-sm">
+                                  {Number(a) > 0 ? (
+                                    <span className="inline-block px-2.5 py-0.5 bg-sky-100/90 text-sky-950 rounded-md font-black border border-sky-200">
+                                      {a}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-300">-</span>
+                                  )}
+                                </div>
+                              )}
                             </td>
                             {/* Row Total */}
                             <td className="py-2 px-2 text-center font-black text-slate-800 bg-amber-50/60">
@@ -989,57 +1099,81 @@ export default function App() {
                             </td>
                             {/* Morning Box */}
                             <td className="py-1.5 px-2 bg-orange-50/30">
-                              <div className="flex items-center justify-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => incrementDay(day, "morning", -1)}
-                                  className="w-5 h-6 rounded bg-slate-200 hover:bg-orange-200 text-slate-700 text-xs font-bold no-print"
-                                >
-                                  -
-                                </button>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  placeholder="0"
-                                  value={m}
-                                  onChange={(e) => updateDay(day, "morning", e.target.value)}
-                                  className="w-12 text-center py-1 bg-white border border-orange-300 rounded-md font-bold text-orange-950 focus:ring-2 focus:ring-orange-400 outline-none text-sm"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => incrementDay(day, "morning", 1)}
-                                  className="w-5 h-6 rounded bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold no-print"
-                                >
-                                  +
-                                </button>
-                              </div>
+                              {isCurrentMonthThisMonth ? (
+                                <div className="flex items-center justify-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => incrementDay(day, "morning", -1)}
+                                    className="w-5 h-6 rounded bg-slate-200 hover:bg-orange-200 text-slate-700 text-xs font-bold no-print"
+                                  >
+                                    -
+                                  </button>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    placeholder="0"
+                                    value={m}
+                                    onChange={(e) => updateDay(day, "morning", e.target.value)}
+                                    className="w-12 text-center py-1 bg-white border border-orange-300 rounded-md font-bold text-orange-950 focus:ring-2 focus:ring-orange-400 outline-none text-sm"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => incrementDay(day, "morning", 1)}
+                                    className="w-5 h-6 rounded bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold no-print"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="text-center py-1 font-bold text-orange-950 text-sm">
+                                  {Number(m) > 0 ? (
+                                    <span className="inline-block px-2.5 py-0.5 bg-orange-100/90 text-orange-950 rounded-md font-black border border-orange-200">
+                                      {m}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-300">-</span>
+                                  )}
+                                </div>
+                              )}
                             </td>
                             {/* Afternoon Box */}
                             <td className="py-1.5 px-2 bg-sky-50/30">
-                              <div className="flex items-center justify-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => incrementDay(day, "afternoon", -1)}
-                                  className="w-5 h-6 rounded bg-slate-200 hover:bg-sky-200 text-slate-700 text-xs font-bold no-print"
-                                >
-                                  -
-                                </button>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  placeholder="0"
-                                  value={a}
-                                  onChange={(e) => updateDay(day, "afternoon", e.target.value)}
-                                  className="w-12 text-center py-1 bg-white border border-sky-300 rounded-md font-bold text-sky-950 focus:ring-2 focus:ring-sky-400 outline-none text-sm"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => incrementDay(day, "afternoon", 1)}
-                                  className="w-5 h-6 rounded bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold no-print"
-                                >
-                                  +
-                                </button>
-                              </div>
+                              {isCurrentMonthThisMonth ? (
+                                <div className="flex items-center justify-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => incrementDay(day, "afternoon", -1)}
+                                    className="w-5 h-6 rounded bg-slate-200 hover:bg-sky-200 text-slate-700 text-xs font-bold no-print"
+                                  >
+                                    -
+                                  </button>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    placeholder="0"
+                                    value={a}
+                                    onChange={(e) => updateDay(day, "afternoon", e.target.value)}
+                                    className="w-12 text-center py-1 bg-white border border-sky-300 rounded-md font-bold text-sky-950 focus:ring-2 focus:ring-sky-400 outline-none text-sm"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => incrementDay(day, "afternoon", 1)}
+                                    className="w-5 h-6 rounded bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold no-print"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="text-center py-1 font-bold text-sky-950 text-sm">
+                                  {Number(a) > 0 ? (
+                                    <span className="inline-block px-2.5 py-0.5 bg-sky-100/90 text-sky-950 rounded-md font-black border border-sky-200">
+                                      {a}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-300">-</span>
+                                  )}
+                                </div>
+                              )}
                             </td>
                             {/* Row Total */}
                             <td className="py-2 px-2 text-center font-black text-slate-800 bg-amber-50/60">
@@ -1172,53 +1306,77 @@ export default function App() {
                         </td>
                         {/* Morning */}
                         <td className="py-2 px-3 text-center bg-orange-50/20">
-                          <div className="inline-flex items-center gap-1.5">
-                            <button
-                              onClick={() => incrementDay(day, "morning", -1)}
-                              className="w-6 h-6 rounded bg-slate-200 hover:bg-orange-200 text-slate-700 text-xs font-bold"
-                            >
-                              -
-                            </button>
-                            <input
-                              type="number"
-                              min="0"
-                              value={m || ""}
-                              placeholder="0"
-                              onChange={(e) => updateDay(day, "morning", e.target.value)}
-                              className="w-12 text-center py-1 bg-white border border-orange-300 rounded font-bold text-orange-950 text-sm"
-                            />
-                            <button
-                              onClick={() => incrementDay(day, "morning", 1)}
-                              className="w-6 h-6 rounded bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold"
-                            >
-                              +
-                            </button>
-                          </div>
+                          {isCurrentMonthThisMonth ? (
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                onClick={() => incrementDay(day, "morning", -1)}
+                                className="w-6 h-6 rounded bg-slate-200 hover:bg-orange-200 text-slate-700 text-xs font-bold"
+                              >
+                                -
+                              </button>
+                              <input
+                                type="number"
+                                min="0"
+                                value={m || ""}
+                                placeholder="0"
+                                onChange={(e) => updateDay(day, "morning", e.target.value)}
+                                className="w-12 text-center py-1 bg-white border border-orange-300 rounded font-bold text-orange-950 text-sm"
+                              />
+                              <button
+                                onClick={() => incrementDay(day, "morning", 1)}
+                                className="w-6 h-6 rounded bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold"
+                              >
+                                +
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="font-bold text-orange-950 text-sm">
+                              {Number(m) > 0 ? (
+                                <span className="inline-block px-2.5 py-0.5 bg-orange-100 text-orange-900 rounded font-black text-xs">
+                                  {m} {lang === "en" ? "Cups" : "કપ"}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 text-xs">-</span>
+                              )}
+                            </div>
+                          )}
                         </td>
                         {/* Afternoon */}
                         <td className="py-2 px-3 text-center bg-sky-50/20">
-                          <div className="inline-flex items-center gap-1.5">
-                            <button
-                              onClick={() => incrementDay(day, "afternoon", -1)}
-                              className="w-6 h-6 rounded bg-slate-200 hover:bg-sky-200 text-slate-700 text-xs font-bold"
-                            >
-                              -
-                            </button>
-                            <input
-                              type="number"
-                              min="0"
-                              value={a || ""}
-                              placeholder="0"
-                              onChange={(e) => updateDay(day, "afternoon", e.target.value)}
-                              className="w-12 text-center py-1 bg-white border border-sky-300 rounded font-bold text-sky-950 text-sm"
-                            />
-                            <button
-                              onClick={() => incrementDay(day, "afternoon", 1)}
-                              className="w-6 h-6 rounded bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold"
-                            >
-                              +
-                            </button>
-                          </div>
+                          {isCurrentMonthThisMonth ? (
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                onClick={() => incrementDay(day, "afternoon", -1)}
+                                className="w-6 h-6 rounded bg-slate-200 hover:bg-sky-200 text-slate-700 text-xs font-bold"
+                              >
+                                -
+                              </button>
+                              <input
+                                type="number"
+                                min="0"
+                                value={a || ""}
+                                placeholder="0"
+                                onChange={(e) => updateDay(day, "afternoon", e.target.value)}
+                                className="w-12 text-center py-1 bg-white border border-sky-300 rounded font-bold text-sky-950 text-sm"
+                              />
+                              <button
+                                onClick={() => incrementDay(day, "afternoon", 1)}
+                                className="w-6 h-6 rounded bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold"
+                              >
+                                +
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="font-bold text-sky-950 text-sm">
+                              {Number(a) > 0 ? (
+                                <span className="inline-block px-2.5 py-0.5 bg-sky-100 text-sky-900 rounded font-black text-xs">
+                                  {a} {lang === "en" ? "Cups" : "કપ"}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 text-xs">-</span>
+                              )}
+                            </div>
+                          )}
                         </td>
                         {/* Day Total */}
                         <td className="py-2.5 px-3 text-center font-black text-amber-900 bg-amber-50/40">
