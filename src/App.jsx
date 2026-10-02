@@ -51,10 +51,25 @@ export default function App() {
   const [activeView, setActiveView] = useState("notebook"); // "notebook" | "table"
   const [lang, setLang] = useState("en"); // "en" | "gu"
 
-  // Check if viewed month is the current active month (only current month is editable)
+  // Check if viewed month is the current active month
   const isCurrentMonthThisMonth =
     today.getFullYear() === currentYear && today.getMonth() === currentMonth;
   const currentTodayDate = today.getDate();
+
+  // Real calendar month number (1 to 12: Jan=1, Sep=9, Oct=10, etc.)
+  const monthNumber = currentMonth + 1;
+  const monthDocId = `${currentYear}_${monthNumber}`;
+
+  // Map of months explicitly unlocked by user (e.g., to edit past or future months)
+  const [unlockedMonths, setUnlockedMonths] = useState({});
+  const isMonthUnlocked = isCurrentMonthThisMonth || Boolean(unlockedMonths[monthDocId]);
+
+  const toggleMonthLock = () => {
+    setUnlockedMonths((prev) => ({
+      ...prev,
+      [monthDocId]: !prev[monthDocId]
+    }));
+  };
 
   const [ratePerCup, setRatePerCup] = useState(() => {
     const saved = localStorage.getItem("chai_tracker_rate");
@@ -69,8 +84,8 @@ export default function App() {
     return localStorage.getItem("chai_tracker_vendor") || "Tea Vendor (Chai Stall)";
   });
 
-  // Storage key for the selected month
-  const storageKey = `chai_data_${currentYear}_${currentMonth}`;
+  // Storage key for the selected month (1-indexed: chai_data_2026_10)
+  const storageKey = `chai_data_${monthDocId}`;
 
   const [monthData, setMonthData] = useState(() => {
     try {
@@ -126,13 +141,17 @@ export default function App() {
     // 2. Real-time sync from Firestore if enabled
     if (isFirebaseConfigured && db) {
       setIsCloudSyncing(true);
-      const monthDocRef = doc(db, "chai_records", `${currentYear}_${currentMonth}`);
+      const monthDocRef = doc(db, "chai_records", monthDocId);
       const unsubscribe = onSnapshot(monthDocRef, (docSnap) => {
         setIsCloudSyncing(false);
         if (docSnap.exists()) {
           const cloudData = docSnap.data()?.days || {};
           setMonthData(cloudData);
           localStorage.setItem(storageKey, JSON.stringify(cloudData));
+        } else {
+          // If no document exists yet in Firestore for this month, reset to empty
+          setMonthData({});
+          localStorage.setItem(storageKey, JSON.stringify({}));
         }
       }, (err) => {
         setIsCloudSyncing(false);
@@ -141,11 +160,11 @@ export default function App() {
 
       return () => unsubscribe();
     }
-  }, [storageKey, currentYear, currentMonth]);
+  }, [storageKey, monthDocId]);
 
-  // Save data to localStorage and Firestore (Only allowed for current month)
+  // Save data to localStorage and Firestore
   const updateDay = async (day, field, value) => {
-    if (!isCurrentMonthThisMonth) return;
+    if (!isMonthUnlocked) return;
     const numVal = Math.max(0, parseInt(value, 10) || 0);
     const updated = {
       ...monthData,
@@ -160,7 +179,7 @@ export default function App() {
 
     if (isFirebaseConfigured && db) {
       try {
-        const monthDocRef = doc(db, "chai_records", `${currentYear}_${currentMonth}`);
+        const monthDocRef = doc(db, "chai_records", monthDocId);
         await setDoc(monthDocRef, { days: updated, updatedAt: new Date().toISOString() }, { merge: true });
       } catch (err) {
         console.error("Firestore save error:", err);
@@ -169,7 +188,7 @@ export default function App() {
   };
 
   const incrementDay = (day, field, delta = 1) => {
-    if (!isCurrentMonthThisMonth) return;
+    if (!isMonthUnlocked) return;
     const current = monthData[day]?.[field] || 0;
     const nextVal = Math.max(0, current + delta);
     updateDay(day, field, nextVal);
@@ -237,13 +256,13 @@ export default function App() {
     setCurrentMonth(today.getMonth());
   };
 
-  // Quick fill helper (only permitted for current month)
+  // Quick fill helper
   const fillDefaultWeekday = async (morningCups = 2, afternoonCups = 2) => {
-    if (!isCurrentMonthThisMonth) {
+    if (!isMonthUnlocked) {
       alert(
         lang === "en"
-          ? "Auto-fill is only allowed for the current active month."
-          : "ઓટો-ફીલ ફક્ત ચાલુ મહિના માટે જ શક્ય છે."
+          ? "Please unlock this month to use auto-fill."
+          : "ઓટો-ફીલ કરવા માટે કૃપા કરીને આ મહિનો અનલૉક કરો."
       );
       return;
     }
@@ -268,7 +287,7 @@ export default function App() {
 
     if (isFirebaseConfigured && db) {
       try {
-        const monthDocRef = doc(db, "chai_records", `${currentYear}_${currentMonth}`);
+        const monthDocRef = doc(db, "chai_records", monthDocId);
         await setDoc(monthDocRef, { days: updated, updatedAt: new Date().toISOString() }, { merge: true });
       } catch (err) {
         console.error("Firestore fill weekday error:", err);
@@ -277,11 +296,11 @@ export default function App() {
   };
 
   const clearMonthData = async () => {
-    if (!isCurrentMonthThisMonth) {
+    if (!isMonthUnlocked) {
       alert(
         lang === "en"
-          ? "Reset is only allowed for the current active month."
-          : "ડેટા સાફ કરવો ફક્ત ચાલુ મહિના માટે જ શક્ય છે."
+          ? "Please unlock this month to reset data."
+          : "ડેટા સાફ કરવા માટે કૃપા કરીને આ મહિનો અનલૉક કરો."
       );
       return;
     }
@@ -295,7 +314,7 @@ export default function App() {
 
       if (isFirebaseConfigured && db) {
         try {
-          const monthDocRef = doc(db, "chai_records", `${currentYear}_${currentMonth}`);
+          const monthDocRef = doc(db, "chai_records", monthDocId);
           await deleteDoc(monthDocRef);
         } catch (err) {
           console.error("Firestore delete error:", err);
@@ -474,11 +493,24 @@ export default function App() {
                   <Unlock className="w-3 h-3" />
                   <span>{lang === "en" ? "Current Month (Editable)" : "ચાલુ મહિનો (એડિટ ચાલુ)"}</span>
                 </span>
+              ) : isMonthUnlocked ? (
+                <button
+                  onClick={toggleMonthLock}
+                  className="px-2.5 py-1 bg-amber-500/30 text-amber-200 border border-amber-400/80 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-amber-500/40 transition"
+                  title="Click to lock this month"
+                >
+                  <Unlock className="w-3 h-3 text-emerald-400" />
+                  <span>{lang === "en" ? "Unlocked (Click to Lock)" : "અનલૉક કરેલ (લૉક કરવા ક્લિક કરો)"}</span>
+                </button>
               ) : (
-                <span className="px-2.5 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold flex items-center gap-1">
-                  <Lock className="w-3 h-3" />
-                  <span>{lang === "en" ? "View Only (Read-Only)" : "માત્ર જોવા માટે (Read-Only)"}</span>
-                </span>
+                <button
+                  onClick={toggleMonthLock}
+                  className="px-2.5 py-1 bg-amber-950/60 text-amber-300 border border-amber-700/80 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-amber-900 transition"
+                  title="Click to unlock and edit this month"
+                >
+                  <Lock className="w-3 h-3 text-amber-400" />
+                  <span>{lang === "en" ? "View Only (Click to Unlock)" : "માત્ર જોવા માટે (અનલૉક કરો)"}</span>
+                </button>
               )}
 
               {!isCurrentMonthThisMonth && (
@@ -594,7 +626,7 @@ export default function App() {
             </div>
 
             <div className="mt-4 pt-3 border-t border-amber-200 flex flex-wrap items-center justify-between gap-2">
-              {isCurrentMonthThisMonth ? (
+              {isMonthUnlocked ? (
                 <div className="flex gap-2 flex-wrap">
                   <button
                     onClick={() => fillDefaultWeekday(2, 2)}
@@ -610,13 +642,21 @@ export default function App() {
                   </button>
                 </div>
               ) : (
-                <div className="text-xs text-amber-900 bg-amber-100 px-3 py-1.5 rounded-xl border border-amber-300 font-medium flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                  <span>
-                    {lang === "en"
-                      ? "Auto-Fill & Reset actions are locked for previous/future months."
-                      : "અગાઉના કે ભવિષ્યના મહિના માટે ઓટો-ફીલ અને રીસેટ વિકલ્પો લૉક કરેલા છે."}
-                  </span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="text-xs text-amber-900 bg-amber-100 px-3 py-1.5 rounded-xl border border-amber-300 font-medium flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                    <span>
+                      {lang === "en"
+                        ? "Actions are locked for this month."
+                        : "આ મહિના માટે ફેરફારો લૉક કરેલા છે."}
+                    </span>
+                  </div>
+                  <button
+                    onClick={toggleMonthLock}
+                    className="px-3 py-1.5 bg-amber-700 hover:bg-amber-800 text-white text-xs font-bold rounded-xl shadow-sm"
+                  >
+                    {lang === "en" ? "Unlock this Month" : "આ મહિનો અનલૉક કરો"}
+                  </button>
                 </div>
               )}
               <button
@@ -802,39 +842,75 @@ export default function App() {
           </div>
         )}
 
-        {/* View-Only Mode Banner for Previous or Future Months */}
+        {/* View-Only / Unlocked Mode Banner for Other Months */}
         {!isCurrentMonthThisMonth && (
           <div className="mb-6 bg-amber-50/90 border-2 border-amber-300 rounded-2xl p-4 shadow-sm flex flex-wrap items-center justify-between gap-4 no-print">
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl bg-amber-200 border border-amber-400/80 flex items-center justify-center text-amber-900 shadow-sm">
-                <Lock className="w-6 h-6" />
+              <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-sm ${
+                isMonthUnlocked
+                  ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                  : "bg-amber-200 text-amber-900 border border-amber-400/80"
+              }`}>
+                {isMonthUnlocked ? <Unlock className="w-6 h-6 text-emerald-700" /> : <Lock className="w-6 h-6" />}
               </div>
               <div>
                 <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                   <span>
                     {lang === "en"
                       ? `Viewing Record: ${MONTHS_EN[currentMonth]} ${currentYear}`
-                      : `જૂનો / આગામી રેકોર્ડ: ${MONTHS_GU[currentMonth]} ${currentYear}`}
+                      : `રેકોર્ડ: ${MONTHS_GU[currentMonth]} ${currentYear}`}
                   </span>
-                  <span className="px-2.5 py-0.5 bg-amber-200 text-amber-900 text-[10px] font-black rounded-full border border-amber-300">
-                    {lang === "en" ? "READ ONLY" : "માત્ર જોવા માટે (LOCKED)"}
-                  </span>
+                  {isMonthUnlocked ? (
+                    <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-black rounded-full border border-emerald-300">
+                      {lang === "en" ? "UNLOCKED (EDITABLE)" : "અનલૉક કરેલ (એડિટ ચાલુ)"}
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 bg-amber-200 text-amber-900 text-[10px] font-black rounded-full border border-amber-300">
+                      {lang === "en" ? "READ ONLY (LOCKED)" : "માત્ર જોવા માટે (LOCKED)"}
+                    </span>
+                  )}
                 </h4>
                 <p className="text-xs text-slate-600">
-                  {lang === "en"
-                    ? "Previous & future month records cannot be edited. All previously entered data is safely preserved."
-                    : "અગાઉના કે ભવિષ્યના મહિનામાં નવો ડેટા ઉમેરી કે બદલી શકાશે નહીં. અગાઉ દાખલ કરેલો જૂનો હિસાબ સુરક્ષિત સચવાયેલો છે."}
+                  {isMonthUnlocked
+                    ? (lang === "en"
+                        ? "This month is unlocked for editing. All changes will be saved to Firebase."
+                        : "આ મહિનો એડિટ કરવા માટે અનલૉક છે. કરેલા તમામ ફેરફારો Firebase પર સેવ થશે.")
+                    : (lang === "en"
+                        ? "Records are preserved safely. Click 'Unlock to Edit' if you want to modify entries for this month."
+                        : "અગાઉનો ડેટા સુરક્ષિત સચવાયેલો છે. જો ફેરફાર કરવો હોય તો 'એડિટ કરવા અનલૉક' કરો.")}
                 </p>
               </div>
             </div>
 
-            <button
-              onClick={goToThisMonth}
-              className="px-4 py-2 bg-gradient-to-r from-amber-700 to-amber-800 hover:from-amber-800 hover:to-amber-900 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center gap-1.5"
-            >
-              <Unlock className="w-3.5 h-3.5" />
-              <span>{lang === "en" ? "Go to Current Month (Editable)" : "ચાલુ મહિનો (એડિટ કરો)"}</span>
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={toggleMonthLock}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold shadow-md transition-all flex items-center gap-1.5 ${
+                  isMonthUnlocked
+                    ? "bg-slate-700 hover:bg-slate-800 text-white"
+                    : "bg-amber-700 hover:bg-amber-800 text-white"
+                }`}
+              >
+                {isMonthUnlocked ? (
+                  <>
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>{lang === "en" ? "Lock Month" : "મહિનો લૉક કરો"}</span>
+                  </>
+                ) : (
+                  <>
+                    <Unlock className="w-3.5 h-3.5" />
+                    <span>{lang === "en" ? "Unlock to Edit" : "એડિટ કરવા અનલૉક કરો"}</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={goToThisMonth}
+                className="px-3.5 py-2 bg-gradient-to-r from-amber-700 to-amber-800 hover:from-amber-800 hover:to-amber-900 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center gap-1.5"
+              >
+                <span>{lang === "en" ? "Go to Current Month" : "ચાલુ મહિનો"}</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -850,9 +926,9 @@ export default function App() {
                 </h2>
               </div>
               <div className="text-xs text-amber-200 font-medium">
-                {isCurrentMonthThisMonth
+                {isMonthUnlocked
                   ? (lang === "en" ? "💡 Enter numbers directly in boxes or use +/- buttons" : "💡 બોક્સમાં સીધા નંબર લખો અથવા +/- કરો")
-                  : (lang === "en" ? "🔒 Read-Only: Previous/future records cannot be modified" : "🔒 માત્ર જોવા માટે: અગાઉનો/ભવિષ્યનો હિસાબ એડિટ થશે નહીં")}
+                  : (lang === "en" ? "🔒 Read-Only: Click 'Unlock to Edit' above to modify records" : "🔒 માત્ર જોવા માટે: એડિટ કરવા ઉપર 'અનલૉક' બટન દબાવો")}
               </div>
             </div>
 
@@ -931,7 +1007,7 @@ export default function App() {
                             </td>
                             {/* Morning Box */}
                             <td className="py-1.5 px-2 bg-orange-50/30">
-                              {isCurrentMonthThisMonth ? (
+                              {isMonthUnlocked ? (
                                 <div className="flex items-center justify-center gap-1">
                                   <button
                                     type="button"
@@ -970,7 +1046,7 @@ export default function App() {
                             </td>
                             {/* Afternoon Box */}
                             <td className="py-1.5 px-2 bg-sky-50/30">
-                              {isCurrentMonthThisMonth ? (
+                              {isMonthUnlocked ? (
                                 <div className="flex items-center justify-center gap-1">
                                   <button
                                     type="button"
@@ -1099,7 +1175,7 @@ export default function App() {
                             </td>
                             {/* Morning Box */}
                             <td className="py-1.5 px-2 bg-orange-50/30">
-                              {isCurrentMonthThisMonth ? (
+                              {isMonthUnlocked ? (
                                 <div className="flex items-center justify-center gap-1">
                                   <button
                                     type="button"
@@ -1138,7 +1214,7 @@ export default function App() {
                             </td>
                             {/* Afternoon Box */}
                             <td className="py-1.5 px-2 bg-sky-50/30">
-                              {isCurrentMonthThisMonth ? (
+                              {isMonthUnlocked ? (
                                 <div className="flex items-center justify-center gap-1">
                                   <button
                                     type="button"
@@ -1306,7 +1382,7 @@ export default function App() {
                         </td>
                         {/* Morning */}
                         <td className="py-2 px-3 text-center bg-orange-50/20">
-                          {isCurrentMonthThisMonth ? (
+                          {isMonthUnlocked ? (
                             <div className="inline-flex items-center gap-1.5">
                               <button
                                 onClick={() => incrementDay(day, "morning", -1)}
@@ -1343,7 +1419,7 @@ export default function App() {
                         </td>
                         {/* Afternoon */}
                         <td className="py-2 px-3 text-center bg-sky-50/20">
-                          {isCurrentMonthThisMonth ? (
+                          {isMonthUnlocked ? (
                             <div className="inline-flex items-center gap-1.5">
                               <button
                                 onClick={() => incrementDay(day, "afternoon", -1)}
